@@ -1,8 +1,7 @@
 <?php
 namespace IMSGlobal\LTI;
 
-use phpseclib\Crypt\RSA;
-use \Firebase\JWT\JWT;
+use phpseclib3\Crypt\PublicKeyLoader;
 
 class JWKS_Endpoint {
 
@@ -28,28 +27,44 @@ class JWKS_Endpoint {
     public function get_public_jwks() {
         $jwks = [];
         foreach ($this->keys as $kid => $private_key) {
-            $key = new RSA();
-            $key->setHash("sha256");
-            $key->loadKey($private_key);
-            $key->setPublicKey(false, RSA::PUBLIC_FORMAT_PKCS8);
-            if ( !$key->publicExponent ) {
+            $jwk = $this->public_jwk($private_key);
+            if ($jwk === null) {
                 continue;
             }
-            $components = array(
+            $jwks[] = array(
                 'kty' => 'RSA',
                 'alg' => 'RS256',
                 'use' => 'sig',
-                'e' => JWT::urlsafeB64Encode($key->publicExponent->toBytes()),
-                'n' => JWT::urlsafeB64Encode($key->modulus->toBytes()),
+                'e' => $jwk['e'],
+                'n' => $jwk['n'],
                 'kid' => (string) $kid,
             );
-            $jwks[] = $components;
         }
         return ['keys' => $jwks];
     }
 
     public function output_jwks() {
         echo json_encode($this->get_public_jwks());
+    }
+
+    private function public_jwk($private_key) {
+        try {
+            $key = PublicKeyLoader::load($private_key);
+            if (method_exists($key, 'getPublicKey')) {
+                $key = $key->getPublicKey();
+            }
+            $decoded = json_decode($key->toString('JWK'), true);
+        }
+        catch (\Throwable $e) {
+            return null;
+        }
+        $jwk = is_array($decoded) && isset($decoded['keys'][0]) && is_array($decoded['keys'][0])
+            ? $decoded['keys'][0]
+            : $decoded;
+        if (!is_array($jwk) || empty($jwk['n']) || empty($jwk['e'])) {
+            return null;
+        }
+        return $jwk;
     }
 
 }
